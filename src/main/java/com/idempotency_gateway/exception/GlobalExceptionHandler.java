@@ -31,15 +31,20 @@ public class GlobalExceptionHandler {
 
         return errors;
     }
-    @ExceptionHandler(
-            IdempotencyConflictException.class
-    )
+    @ExceptionHandler(IdempotencyConflictException.class)
     @ResponseStatus(HttpStatus.CONFLICT)
-    public ErrorResponse handleConflict(
-            IdempotencyConflictException ex) {
+    public Map<String, String> handleConflict(
+            IdempotencyConflictException ex
+    ) {
 
-        return ErrorResponse.builder()
-                .error(ex.getMessage())
-                .build();
+        Map<String, String> error =
+                new HashMap<>();
+
+        error.put(
+                "error",
+                ex.getMessage()
+        );
+
+        return error;
     }
 }
