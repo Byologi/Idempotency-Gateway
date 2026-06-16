@@ -1,5 +1,6 @@
 package com.idempotency_gateway.service;
 
+import com.idempotency_gateway.dto.IdempotencyResult;
 import org.springframework.stereotype.Component;
 
 import java.util.concurrent.CompletableFuture;
@@ -8,16 +9,16 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class RequestCoordinator {
 
-    private final ConcurrentHashMap<String, CompletableFuture<Void>>
+    private final ConcurrentHashMap<String, CompletableFuture<IdempotencyResult>>
             inFlightRequests = new ConcurrentHashMap<>();
 
-    public CompletableFuture<Void> get(String key) {
+    public CompletableFuture<IdempotencyResult> get(String key) {
         return inFlightRequests.get(key);
     }
 
     public void put(
             String key,
-            CompletableFuture<Void> future
+            CompletableFuture<IdempotencyResult> future
     ) {
         inFlightRequests.put(key, future);
     }

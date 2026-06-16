@@ -11,6 +11,7 @@ import com.idempotency_gateway.util.PayloadHashUtil;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import java.util.concurrent.CompletableFuture;
 
 import java.util.Optional;
 
@@ -20,6 +21,7 @@ public class IdempotencyService {
 
     private final IdempotencyRepository repository;
     private final PaymentService paymentService;
+    private final RequestCoordinator requestCoordinator;
 
     @Transactional
     public IdempotencyResult process(
@@ -33,6 +35,21 @@ public class IdempotencyService {
                                 + ":" +
                                 request.getCurrency()
                 );
+
+        CompletableFuture<IdempotencyResult> inFlight =
+                requestCoordinator.get(idempotencyKey);
+
+        if (inFlight != null) {
+
+            IdempotencyResult result =
+                    inFlight.join();
+
+            return IdempotencyResult.builder()
+                    .response(result.getResponse())
+                    .statusCode(result.getStatusCode())
+                    .cacheHit(true)
+                    .build();
+        }
 
         Optional<IdempotencyRecord> existing =
                 repository.findByIdempotencyKey(
@@ -67,38 +84,66 @@ public class IdempotencyService {
                     .build();
         }
 
-        PaymentResponse response =
-                paymentService.processPayment(
-                        request
-                );
+        CompletableFuture<IdempotencyResult> future =
+                new CompletableFuture<>();
 
-        IdempotencyRecord record =
-                new IdempotencyRecord();
-
-        record.setIdempotencyKey(
-                idempotencyKey
+        requestCoordinator.put(
+                idempotencyKey,
+                future
         );
 
-        record.setPayloadHash(
-                payloadHash
-        );
+        try {
 
-        record.setStatus(
-                IdempotencyStatus.COMPLETED
-        );
+            PaymentResponse response =
+                    paymentService.processPayment(
+                            request
+                    );
 
-        record.setStatusCode(201);
+            IdempotencyRecord record =
+                    new IdempotencyRecord();
 
-        record.setResponseBody(
-                response.getMessage()
-        );
+            record.setIdempotencyKey(
+                    idempotencyKey
+            );
 
-        repository.save(record);
+            record.setPayloadHash(
+                    payloadHash
+            );
 
-        return IdempotencyResult.builder()
-                .response(response)
-                .statusCode(201)
-                .cacheHit(false)
-                .build();
+            record.setStatus(
+                    IdempotencyStatus.COMPLETED
+            );
+
+            record.setStatusCode(201);
+
+            record.setResponseBody(
+                    response.getMessage()
+            );
+
+            repository.save(record);
+
+            IdempotencyResult result =
+                    IdempotencyResult.builder()
+                            .response(response)
+                            .statusCode(201)
+                            .cacheHit(false)
+                            .build();
+
+            future.complete(result);
+
+            return result;
+
+        } catch (Exception ex) {
+
+            future.completeExceptionally(ex);
+
+            throw ex;
+
+        } finally {
+
+            requestCoordinator.remove(
+                    idempotencyKey
+            );
+        }
     }
 }
