@@ -12,6 +12,7 @@ import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import java.util.concurrent.CompletableFuture;
+import java.time.LocalDateTime;
 
 import java.util.Optional;
 
@@ -56,32 +57,44 @@ public class IdempotencyService {
                         idempotencyKey
                 );
 
+
         if (existing.isPresent()) {
 
             IdempotencyRecord record =
                     existing.get();
 
-            if (!record.getPayloadHash()
-                    .equals(payloadHash)) {
+            if (
+                    record.getExpiresAt() != null &&
+                            record.getExpiresAt()
+                                    .isBefore(LocalDateTime.now())
+            ) {
 
-                throw new IdempotencyConflictException(
-                        "Idempotency key already used for a different request body."
-                );
+                repository.delete(record);
+
+            } else {
+
+                if (!record.getPayloadHash()
+                        .equals(payloadHash)) {
+
+                    throw new IdempotencyConflictException(
+                            "Idempotency key already used for a different request body."
+                    );
+                }
+
+                return IdempotencyResult.builder()
+                        .response(
+                                PaymentResponse.builder()
+                                        .message(
+                                                record.getResponseBody()
+                                        )
+                                        .build()
+                        )
+                        .statusCode(
+                                record.getStatusCode()
+                        )
+                        .cacheHit(true)
+                        .build();
             }
-
-            return IdempotencyResult.builder()
-                    .response(
-                            PaymentResponse.builder()
-                                    .message(
-                                            record.getResponseBody()
-                                    )
-                                    .build()
-                    )
-                    .statusCode(
-                            record.getStatusCode()
-                    )
-                    .cacheHit(true)
-                    .build();
         }
 
         CompletableFuture<IdempotencyResult> future =
@@ -108,6 +121,10 @@ public class IdempotencyService {
 
             record.setPayloadHash(
                     payloadHash
+            );
+
+            record.setExpiresAt(
+                    LocalDateTime.now().plusHours(24)
             );
 
             record.setStatus(
