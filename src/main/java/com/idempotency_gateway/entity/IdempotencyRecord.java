@@ -33,7 +33,7 @@ public class IdempotencyRecord {
     @Column(nullable = false)
     private IdempotencyStatus status;
 
-    @Lob
+    @Column(nullable = false)
     private String responseBody;
 
     private Integer statusCode;
