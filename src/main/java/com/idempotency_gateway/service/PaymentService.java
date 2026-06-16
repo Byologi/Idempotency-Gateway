@@ -8,7 +8,7 @@ import org.springframework.stereotype.Service;
 
 @Service
 @RequiredArgsConstructor
-public class IdempotencyService {
+public class PaymentService {
 
     private final IdempotencyRepository repository;
 

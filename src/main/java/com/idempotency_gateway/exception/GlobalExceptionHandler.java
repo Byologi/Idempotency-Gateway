@@ -1,6 +1,7 @@
 package com.idempotency_gateway.exception;
 
 import org.springframework.http.HttpStatus;
+import com.idempotency_gateway.dto.ErrorResponse;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.*;
 
@@ -29,5 +30,16 @@ public class GlobalExceptionHandler {
                         ));
 
         return errors;
+    }
+    @ExceptionHandler(
+            IdempotencyConflictException.class
+    )
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleConflict(
+            IdempotencyConflictException ex) {
+
+        return ErrorResponse.builder()
+                .error(ex.getMessage())
+                .build();
     }
 }
