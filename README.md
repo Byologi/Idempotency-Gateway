@@ -1,7 +1,4 @@
 # Idempotency Gateway
-
-> **FinSafe Transactions Ltd.** — A production-grade Java + Spring Boot service that guarantees safe, duplicate-free payment processing.
-
 ---
 
 ## Overview
@@ -58,9 +55,9 @@ Submits a payment request. The `Idempotency-Key` header controls deduplication.
 **Headers**
 
 | Header            | Required | Description                    |
-|-------------------|----------|--------------------------------|
-| `Idempotency-Key` | ✅ Yes   | A unique string per transaction |
-| `Content-Type`    | ✅ Yes   | `application/json`             |
+|-------------------|------|--------------------------------|
+| `Idempotency-Key` | Yes | A unique string per transaction |
+| `Content-Type`    | Yes | `application/json`             |
 
 **Request Body**
 
@@ -75,7 +72,7 @@ Submits a payment request. The `Idempotency-Key` header controls deduplication.
 
 ### Response Scenarios
 
-#### ✅ First Request — `201 Created`
+#### First Request — `201 Created`
 
 ```json
 {
@@ -83,7 +80,7 @@ Submits a payment request. The `Idempotency-Key` header controls deduplication.
 }
 ```
 
-#### 🔁 Duplicate Request (same key + same payload) — `201 Created`
+#### Duplicate Request (same key + same payload) — `201 Created`
 
 Returns the cached response. Includes a cache-hit indicator header:
 
@@ -97,7 +94,7 @@ X-Cache-Hit: true
 }
 ```
 
-#### ❌ Payload Mismatch (same key + different payload) — `409 Conflict`
+#### Payload Mismatch (same key + different payload) — `409 Conflict`
 
 ```json
 {
@@ -105,7 +102,7 @@ X-Cache-Hit: true
 }
 ```
 
-#### ❌ Validation Error — `400 Bad Request`
+#### Validation Error — `400 Bad Request`
 
 ```json
 {
@@ -231,7 +228,3 @@ curl -X POST http://localhost:8080/process-payment \
 Returns `409 Conflict`.
 
 ---
-
-## License
-
-This project is proprietary to **FinSafe Transactions Ltd.** All rights reserved.

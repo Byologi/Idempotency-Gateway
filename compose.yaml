@@ -1,9 +1,36 @@
 services:
+
   postgres:
-    image: 'postgres:latest'
+    image: postgres:16
+
+    container_name: idempotency-postgres
+
     environment:
-      - 'POSTGRES_DB=mydatabase'
-      - 'POSTGRES_PASSWORD=secret'
-      - 'POSTGRES_USER=myuser'
+      POSTGRES_DB: idempotency_gateway
+      POSTGRES_USER: idempotency_user
+      POSTGRES_PASSWORD: myLovia
+
     ports:
-      - '5432'
+      - "5434:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  app:
+    build: .
+
+    container_name: idempotency-gateway
+
+    depends_on:
+      - postgres
+
+    ports:
+      - "8081:8080"
+
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/idempotency_gateway
+      SPRING_DATASOURCE_USERNAME: idempotency_user
+      SPRING_DATASOURCE_PASSWORD: myLovia
+
+volumes:
+  postgres_data:
