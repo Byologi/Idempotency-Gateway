@@ -1,25 +1,18 @@
-# Idempotency Gateway
----
+# Idempotency Gateway — Pay Once Protocol
 
+---
 ## Overview
 
-The **Idempotency Gateway** is a backend service built with **Java**, **Spring Boot**, and **PostgreSQL** that ensures reliable payment processing by preventing duplicate charges caused by network retries.
+The **Idempotency Gateway** implements an idempotency layer for payment processing, ensuring that a payment request is processed **exactly once** — even when the client retries due to network failures, timeouts, duplicate submissions, or concurrent requests.
 
-Every payment request carrying the same `Idempotency-Key` is processed **exactly once** — even under concurrent or repeated submissions.
+The system combines:
 
----
+- **Idempotency Keys** — unique per-transaction identifiers
+- **Payload Hash Validation** — SHA-256 verification of request bodies
+- **PostgreSQL Persistence** — durable storage of processed requests
+- **In-Memory Request Coordination** — race condition prevention via `ConcurrentHashMap`
 
-## Features
-
-- Idempotent payment processing via `Idempotency-Key` header
-- Protection against duplicate charges on retries
-- Replay of previous responses for repeated requests
-- Payload mismatch detection (security safeguard)
-- Concurrency-safe request handling
-- PostgreSQL-backed persistence layer
-- Input validation with structured error responses
-- Cache-hit detection via response headers
-- TTL-based idempotency key expiration (24 hours)
+A request sharing the same idempotency key and payload receives the previously computed response instead of triggering another payment execution.
 
 ---
 
@@ -35,7 +28,7 @@ flowchart TD
     E --> F[Return Cached Response + X-Cache-Hit: true]
     D -->|Not Exists| G[Check DB for Key]
     G -->|Key Exists| H{Payload Matches?}
-    H -->|No| I[409 / 422 Conflict Error]
+    H -->|No| I[409 Conflict Error]
     H -->|Yes| J[Return Stored Response]
     G -->|New Key| K[Register In-Flight Future]
     K --> L[Simulate Payment Processing 2s delay]
@@ -46,18 +39,104 @@ flowchart TD
 
 ---
 
+## Component Overview
+
+```
+Client
+   │
+   ▼
+PaymentController
+   │
+   ▼
+IdempotencyService
+   │
+   ├── PayloadHashUtil          →  Generates SHA-256 hash of request body
+   │
+   ├── RequestCoordinator       →  Coordinates in-flight requests
+   │
+   ├── PaymentService           →  Simulates payment processing
+   │
+   └── IdempotencyRepository
+           │
+           ▼
+      PostgreSQL
+```
+
+---
+
+## Tech Stack
+
+| Layer        | Technology          |
+|--------------|---------------------|
+| Language     | Java 21             |
+| Framework    | Spring Boot         |
+| Persistence  | Spring Data JPA     |
+| Database     | PostgreSQL          |
+| Build Tool   | Maven               |
+| Container    | Docker + Compose    |
+| Utilities    | Lombok              |
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Java 21
+- Maven
+- Docker & Docker Compose
+
+### 1. Clone the Repository
+
+```bash
+git clone https://github.com/your-username/idempotency-gateway.git
+cd idempotency-gateway
+```
+
+### 2. Run Locally
+
+Start PostgreSQL:
+
+```bash
+docker compose up -d postgres
+```
+
+Run the application:
+
+```bash
+./mvnw spring-boot:run
+```
+
+The service starts at `http://localhost:8080`.
+
+### 3. Run with Docker (Full Stack)
+
+```bash
+# Build containers
+docker compose build
+
+# Start all containers
+docker compose up -d
+
+# Verify running containers
+docker ps
+
+# Stop containers
+docker compose down
+```
+
+---
+
 ## API Reference
 
 ### `POST /process-payment`
 
-Submits a payment request. The `Idempotency-Key` header controls deduplication.
+**Required Headers**
 
-**Headers**
-
-| Header            | Required | Description                    |
-|-------------------|------|--------------------------------|
-| `Idempotency-Key` | Yes | A unique string per transaction |
-| `Content-Type`    | Yes | `application/json`             |
+| Header            | Value              |
+|-------------------|--------------------|
+| `Idempotency-Key` | `payment-001`      |
+| `Content-Type`    | `application/json` |
 
 **Request Body**
 
@@ -72,7 +151,7 @@ Submits a payment request. The `Idempotency-Key` header controls deduplication.
 
 ### Response Scenarios
 
-#### First Request — `201 Created`
+#### ✅ First Request — `201 Created`
 
 ```json
 {
@@ -80,9 +159,9 @@ Submits a payment request. The `Idempotency-Key` header controls deduplication.
 }
 ```
 
-#### Duplicate Request (same key + same payload) — `201 Created`
+#### 🔁 Duplicate Request (same key + same payload) — `201 Created`
 
-Returns the cached response. Includes a cache-hit indicator header:
+Response header:
 
 ```
 X-Cache-Hit: true
@@ -94,7 +173,7 @@ X-Cache-Hit: true
 }
 ```
 
-#### Payload Mismatch (same key + different payload) — `409 Conflict`
+#### ❌ Payload Mismatch (same key + different payload) — `409 Conflict`
 
 ```json
 {
@@ -102,12 +181,20 @@ X-Cache-Hit: true
 }
 ```
 
-#### Validation Error — `400 Bad Request`
+#### ❌ Validation Failure — `400 Bad Request`
 
 ```json
 {
   "amount": "Amount is required",
   "currency": "Currency is required"
+}
+```
+
+#### ❌ Missing Idempotency Header — `400 Bad Request`
+
+```json
+{
+  "Idempotency-Key": "Idempotency-Key header is required"
 }
 ```
 
@@ -117,114 +204,92 @@ X-Cache-Hit: true
 
 **Table:** `idempotency_records`
 
-| Column            | Type        | Description                         |
-|-------------------|-------------|-------------------------------------|
-| `id`              | `bigint`    | Primary key                         |
-| `idempotency_key` | `varchar`   | Unique request identifier           |
-| `payload_hash`    | `varchar`   | SHA hash of the request body        |
-| `status`          | `enum`      | `PROCESSING` / `COMPLETED` / `FAILED` |
-| `response_body`   | `text`      | Stored response payload             |
-| `status_code`     | `int`       | HTTP status code of the response    |
-| `created_at`      | `timestamp` | Record creation time                |
-| `updated_at`      | `timestamp` | Last modification time              |
-| `expires_at`      | `timestamp` | TTL expiration (24h from creation)  |
+| Column            | Type        | Description                            |
+|-------------------|-------------|----------------------------------------|
+| `id`              | `bigint`    | Primary key                            |
+| `idempotency_key` | `varchar`   | Unique request identifier              |
+| `payload_hash`    | `varchar`   | SHA-256 hash of the request body       |
+| `status`          | `enum`      | `PROCESSING` / `COMPLETED` / `FAILED`  |
+| `response_body`   | `text`      | Stored response payload                |
+| `status_code`     | `int`       | HTTP status code of the response       |
+| `created_at`      | `timestamp` | Record creation time                   |
+| `updated_at`      | `timestamp` | Last modification time                 |
+| `expires_at`      | `timestamp` | TTL expiration (24h from creation)     |
+
+Records automatically expire **24 hours** after creation.
 
 ---
 
 ## Design Decisions
 
-### Idempotency Key Strategy
-Each request must carry a unique `Idempotency-Key` header. This key is the primary mechanism for detecting retries and preventing duplicate processing.
+### Why PostgreSQL?
 
-### Payload Hashing
-The request body is hashed and stored alongside the key. On retry, hashes are compared — a mismatch triggers a `409 Conflict` to guard against accidental or malicious key reuse.
+PostgreSQL provides ACID transactions, data integrity, and reliable long-term persistence. Storing idempotency records in a durable database allows the application to replay previous responses across restarts without re-executing business logic.
 
-### Database as Source of Truth
-PostgreSQL stores all processed requests and their responses, providing durability across service restarts and horizontal scaling.
+### Why Payload Hashing?
 
-### Concurrency Handling
-In-flight request tracking ensures that simultaneous requests sharing the same key return consistent results without triggering double processing.
+An idempotency key alone is insufficient. Two requests may accidentally reuse the same key with different payloads. The application generates a **SHA-256 hash** of the request body and compares it on every retry — a mismatch triggers a `409 Conflict`, preventing accidental or malicious key reuse.
 
-### TTL / Key Expiration
-Each record carries an `expires_at` timestamp set 24 hours from creation. Expired keys are treated as new, preventing database bloat and stale key reuse.
+### Why RequestCoordinator?
 
----
+Concurrent duplicate requests can cause race conditions before either request has written to the database. `RequestCoordinator` uses a `ConcurrentHashMap<String, CompletableFuture<IdempotencyResult>>` to track in-flight requests, ensuring:
 
-## Tech Stack
+- Only **one** request performs the payment operation
+- Concurrent duplicates **wait** for the in-flight request to complete
+- All callers receive the **exact same result**
 
-| Layer        | Technology          |
-|--------------|---------------------|
-| Language     | Java 21             |
-| Framework    | Spring Boot 4       |
-| Web          | Spring Web (MVC)    |
-| Persistence  | Spring Data JPA     |
-| ORM          | Hibernate           |
-| Database     | PostgreSQL          |
-| Build Tool   | Maven               |
+### Why Docker?
+
+Docker ensures consistent environments across all machines, simplifies setup for reviewers, and isolates the PostgreSQL database. The entire stack starts with a single `docker compose up` command.
 
 ---
 
-## Getting Started
+## Bonus User Story — In-Flight Request Handling
 
-### 1. Clone the Repository
+### Scenario
 
-```bash
-git clone <your-repo-url>
-cd Idempotency-Gateway
-```
+1. **Request A** arrives and begins processing.
+2. **Request B** arrives with the same idempotency key before Request A finishes.
+3. Request B detects the in-flight operation and waits.
+4. Once Request A completes, Request B receives the exact same response.
 
-### 2. Set Up PostgreSQL
+### Acceptance Criteria
 
-```sql
-CREATE DATABASE idempotency_gateway;
+| Criteria | Status |
+|----------|--------|
+| Request B does not start a new payment process | ✅ |
+| Request B does not return a `409 Conflict` | ✅ |
+| Request B waits until Request A completes | ✅ |
+| Request B receives the same result as Request A | ✅ |
 
-CREATE USER idempotency_user WITH PASSWORD 'your_password';
-GRANT ALL PRIVILEGES ON DATABASE idempotency_gateway TO idempotency_user;
-```
+### Benefits
 
-### 3. Configure `application.properties`
-
-```properties
-spring.datasource.url=jdbc:postgresql://localhost:5432/idempotency_gateway
-spring.datasource.username=idempotency_user
-spring.datasource.password=your_password
-
-spring.jpa.hibernate.ddl-auto=create
-spring.jpa.show-sql=true
-```
-
-### 4. Run the Application
-
-```bash
-mvn spring-boot:run
-```
-
-The service starts on `http://localhost:8080`.
+- Prevents race conditions and duplicate payments
+- Guarantees only one database record is created per transaction
+- Maintains consistency across simultaneous requests
 
 ---
 
-## Testing with cURL
+## Developer's Choice Feature — Expiration Support
 
-**First request:**
+Each idempotency record is assigned an expiration timestamp **24 hours** after creation:
 
-```bash
-curl -X POST http://localhost:8080/process-payment \
-  -H "Idempotency-Key: payment-001" \
-  -H "Content-Type: application/json" \
-  -d '{"amount": 100, "currency": "GHS"}'
+```java
+record.setExpiresAt(
+    LocalDateTime.now().plusHours(24)
+);
 ```
 
-**Retry (same command):** Returns the cached `201` response with `X-Cache-Hit: true`.
+### Why This Was Added
 
-**Payload mismatch:**
+In production payment systems, idempotency records should not remain in storage indefinitely. Expiration support:
 
-```bash
-curl -X POST http://localhost:8080/process-payment \
-  -H "Idempotency-Key: payment-001" \
-  -H "Content-Type: application/json" \
-  -d '{"amount": 200, "currency": "USD"}'
-```
+- Controls long-term database growth
+- Supports future scheduled cleanup jobs
+- Aligns with industry practices for temporary idempotency retention
+- Improves scalability and maintainability
 
-Returns `409 Conflict`.
+Every record stores `created_at`, `updated_at`, and `expires_at` — with `expires_at` automatically set on creation.
 
 ---
+

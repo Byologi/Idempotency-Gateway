@@ -16,7 +16,7 @@ public class PaymentService {
             PaymentRequest request
     ) throws InterruptedException {
 
-        Thread.sleep(2000);
+        Thread.sleep(10000);
 
         return PaymentResponse.builder()
                 .message(
