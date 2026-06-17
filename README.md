@@ -89,7 +89,7 @@ IdempotencyService
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/your-username/idempotency-gateway.git
+git clone https://github.com/Byologi/idempotency-gateway.git
 cd idempotency-gateway
 ```
 
